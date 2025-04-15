@@ -43,7 +43,7 @@ takeoff 5
 
 
 
-# How to drive the drone manually? (CLI) (SKIP)
+# How to drive the drone manually? (CLI) (SKIP EVERYTHING BELOW)
 ## Run Gazebo
 ```sh
 gz sim -v4 -r iris_runway.sdf
