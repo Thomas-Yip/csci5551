@@ -53,6 +53,10 @@ Whenever you want to use the container, run the following command. (Do this if y
 ```sh
 docker exec -it drone bash
 ```
+OR 
+```sh
+./p.sh
+```
 4. Close an active terminal 
 ```sh
 exit
