@@ -29,6 +29,7 @@
         sudo \
         wget \
         vim \
+        tmux \
       && rm -rf /var/lib/apt/lists/*
     
     # ---------------------------------------------------------------------------
@@ -149,12 +150,16 @@
     RUN echo 'export GZ_SIM_SYSTEM_PLUGIN_PATH=$HOME/ardupilot_gazebo/build:${GZ_SIM_SYSTEM_PLUGIN_PATH}' >> ~/.bashrc
     RUN echo 'export GZ_SIM_RESOURCE_PATH=$HOME/ardupilot_gazebo/models:$HOME/ardupilot_gazebo/worlds:${GZ_SIM_RESOURCE_PATH}' >> ~/.bashrc
     RUN echo 'source /opt/ros/humble/setup.bash' >> ~/.bashrc
-    run echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.bashrc
+    RUN echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.bashrc
+    RUN echo 'export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:$HOME/colcon_ws/src/drone_description/models' >> ~/.bashrc
+    RUN echo 'export GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH:$HOME/colcon_ws/src/drone_description/worlds' >> ~/.bashrc
+
     # ---------------------------------------------------------------------------
     # (Optional) Enable Matplotlib if you want --console mode in sim_vehicle.py
     # ---------------------------------------------------------------------------
     RUN pip3 install matplotlib
-
+    RUN sudo apt-get install -y ros-humble-mavros
+    RUN sudo ./install_geographiclib_datasets.sh
     # ---------------------------------------------------------------------------
     # Done
     # ---------------------------------------------------------------------------
