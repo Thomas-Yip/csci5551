@@ -10,12 +10,10 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 def generate_launch_description():
 
-    # mavros_params_file = os.path.expanduser('/home/orca4/colcon_ws/src/drone_bringup/params/sim_mavros_params.yaml')
     drone_description = get_package_share_directory('drone_description')
     world_file = os.path.join(drone_description, 'worlds', 'iris_runway.sdf')
     drone_bringup = get_package_share_directory('drone_bringup')
     mavros_params_file = os.path.join(drone_bringup, 'params', 'sim_mavros_params.yaml')
-    # Paths to your ArduSub defaults file
 
     return LaunchDescription([
         ExecuteProcess(
@@ -28,4 +26,18 @@ def generate_launch_description():
         output='screen',
         parameters=[mavros_params_file],
         ),
+
+        Node(
+            package='ros_gz_image',
+            executable='image_bridge',
+            arguments=['stereo_left', 'stereo_right'],
+            output='screen',
+        ),
+
+        Node(
+            package='rqt_image_view',
+            executable='rqt_image_view',
+        )
+
+
     ])
