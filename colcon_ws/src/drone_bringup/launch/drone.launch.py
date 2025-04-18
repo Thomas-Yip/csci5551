@@ -11,7 +11,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
 
     drone_description = get_package_share_directory('drone_description')
-    world_file = os.path.join(drone_description, 'worlds', 'iris_runway.sdf')
+    world_file = os.path.join(drone_description, 'worlds', 'sand.world')
     drone_bringup = get_package_share_directory('drone_bringup')
     mavros_params_file = os.path.join(drone_bringup, 'params', 'sim_mavros_params.yaml')
 
@@ -30,7 +30,9 @@ def generate_launch_description():
         Node(
             package='ros_gz_image',
             executable='image_bridge',
-            arguments=['stereo_left', 'stereo_right'],
+            arguments=[ '/rgbd_camera/depth_image',
+                        '/rgbd_camera/image',
+                        ],
             output='screen',
         ),
 
