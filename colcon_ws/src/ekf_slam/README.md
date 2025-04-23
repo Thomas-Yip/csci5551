@@ -1,0 +1,11 @@
+# ekf_slam
+## How to get the 3D position of a point relative to the drone?
+```py
+# Read the depth value (Z) at (u,v)
+d = float(depth[self.v, self.u])
+
+# Back‑project to camera frame
+X = (self.u - self.cx) * d / self.fx
+Y = (self.v - self.cy) * d / self.fy
+Z = d
+```

@@ -47,7 +47,7 @@ public:
         setpoint.pose.position.z = setPoints[current_setpoint_ind][2];
         setpoint.header.stamp = this->now();
         setpoint.header.frame_id = "map"; // Use "map" as the frame of reference.
-        if(check_setpoint_reached(current_pose, setpoint)) {
+        if(check_setpoint_reached(current_pose, setpoint)) { // use the odometry to update the current waypoint
             current_setpoint_ind++;
         }
         if(current_setpoint_ind == final_setpoint_ind) {

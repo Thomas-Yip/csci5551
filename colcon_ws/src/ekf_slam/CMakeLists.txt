@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(slam)
+project(ekf_slam)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -7,6 +7,9 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
@@ -23,4 +26,11 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
+ament_python_install_package(${PROJECT_NAME})
+
+install(PROGRAMS
+  ekf_slam/src/rgbd_cam_test.py
+  ekf_slam/src/ekf_slam.py
+  DESTINATION lib/${PROJECT_NAME}
+)
 ament_package()
