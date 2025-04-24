@@ -50,7 +50,7 @@ class DepthSubscriber(Node):
         rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         self.rgb_img = rgb
     
-    def main_loop(self):
+    def main_loop(self): 
         # feature extraction 
         # Need to choose the 
         kp, des = self.sift.detectAndCompute(self.rgb_img, None)

@@ -51,9 +51,10 @@ public:
             current_setpoint_ind++;
         }
         if(current_setpoint_ind == final_setpoint_ind) {
-            setpoint.pose.position.x = 0;
-            setpoint.pose.position.y = 0;
-            setpoint.pose.position.z = 10; // Return to the initial position
+            // setpoint.pose.position.x = 0;
+            // setpoint.pose.position.y = 0;
+            // setpoint.pose.position.z = 10; // Return to the initial position
+            current_setpoint_ind = 0;
         }
 
         publish_setpoint(setpoint);
@@ -111,7 +112,11 @@ private:
     {10, 10, 10},
     {0, 10, 10},
     {0, 0, 10}
+    
   };
+
+  // {x, y, z}
+  // red, green, blue  
   int current_setpoint_ind = 0; // Index to track the current setpoint.
   int final_setpoint_ind = 4;
 };
