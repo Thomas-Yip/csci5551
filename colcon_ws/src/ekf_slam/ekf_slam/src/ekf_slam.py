@@ -40,6 +40,11 @@ class DepthSubscriber(Node):
         # Main loop
         self.timer = self.create_timer(0.1, self.main_loop)  # 10Hz
 
+        # aruco marker detection
+        self.aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
+        self.parameters = cv2.aruco.DetectorParameters_create()
+        # detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
+
     def depth_cb(self, msg: Image):
         # Convert ROS Image to OpenCV
         depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='32FC1')
@@ -52,14 +57,20 @@ class DepthSubscriber(Node):
     
     def main_loop(self): 
         # feature extraction 
-        # Need to choose the 
         kp, des = self.sift.detectAndCompute(self.rgb_img, None)
         # draw keypoints
         rgb_img = cv2.drawKeypoints(self.rgb_img, kp, None)
         self.debug_img = rgb_img
-        print("Keypoints:", len(kp))
+        # print("Keypoints:", len(kp))
+        self.detect_aruco_markers()
         # Need to use rqt_image viewer to see the debug image
         self.debug_pub.publish(self.bridge.cv2_to_imgmsg(self.debug_img, encoding='bgr8'))
+    
+    def detect_aruco_markers(self):
+        # Convert the image to grayscale
+        gray = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2GRAY)
+        corners, ids, rejected = cv2.aruco.detectMarkers(gray, self.aruco_dict, parameters=self.parameters)
+        print("Detected markers:", ids)
 
 def main(args=None):
     rclpy.init(args=args)
