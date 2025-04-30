@@ -29,7 +29,6 @@ endif()
 ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS
-  ekf_slam/src/rgbd_cam_test.py
   ekf_slam/src/main.py
   DESTINATION lib/${PROJECT_NAME}
 )

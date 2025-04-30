@@ -9,9 +9,10 @@ from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from aruco_marker import ArucoMarker
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Imu
 
 MAX_FEATURES = 16
-MAX_LANDMARKS = 500
+MAX_LANDMARKS = 512
 DESC_DIM      = 32   # ORB’s descriptor length
 
 class EKFSLAM:
@@ -26,7 +27,7 @@ class EKFSLAM:
 
         # noise parameters
         self.Q_motion = np.eye(2, dtype=np.float32) * 0.1
-        self.R_meas_var = 0.1
+        self.R_meas_var = 0.9
         self.init_landmark_cov = 1.0
 
         # ORB matcher
@@ -62,6 +63,33 @@ class EKFSLAM:
         self.node.create_subscription(Image, rgb_topic, self.rgb_cb, qos)
         self.node.create_subscription(Image, depth_topic, self.depth_cb, qos)
         self.node.create_subscription(Odometry, '/mavros/local_position/odom', self.odom_cb, qos)
+        self.node.create_subscription(Imu, '/world/iris_runway/model/iris_with_depth_camera/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu', self.imu_cb, qos)
+        self.vel_sub = self.node.create_subscription(TwistStamped,'/mavros/local_position/velocity_local',self.vel_callback,qos)
+        self.last_vel_ts = None
+        self.last_imu_ts = None
+
+        self.yaw = 0.0
+        self.roll = 0.0
+        self.pitch = 0.0
+
+    def vel_callback(self, msg):
+        ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if self.last_vel_ts is None:
+            self.last_vel_ts = ts
+            return  # Skip first frame, because we have no delta_t yet
+        dt = ts - self.last_vel_ts
+
+        if dt > 0:
+            self.R_bw = np.array([
+                [ np.cos(self.yaw), -np.sin(self.yaw)],
+                [ np.sin(self.yaw),  np.cos(self.yaw)],
+            ])
+            vx = msg.twist.linear.x
+            vy = msg.twist.linear.y
+            v_body = np.array([vx, vy])
+            # v_world = self.R_bw @ v_body
+            # self.prediction(v_body[0]*dt, v_body[1]*dt) # control input
+        self.last_vel_ts = ts
 
     def odom_cb(self, msg: Odometry):
         x, y = msg.pose.pose.position.x, msg.pose.pose.position.y
@@ -69,8 +97,39 @@ class EKFSLAM:
             self.last_odom = np.array([x, y], dtype=np.float32)
             return
         dx, dy = x - self.last_odom[0], y - self.last_odom[1]
-        self.prediction(dx, dy)
+        # self.prediction(dx, dy)
         self.last_odom = np.array([x, y], dtype=np.float32)
+
+    def imu_cb(self, msg: Imu):
+        ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if self.last_imu_ts is None:
+            self.last_imu_ts = ts
+            return  # Skip first frame, because we have no delta_t yet
+        dt = ts - self.last_imu_ts
+        q = msg.orientation
+        x, y, z, w = q.x, q.y, q.z, q.w
+
+        # Roll (rotation around X-axis)
+        sinr_cosp = 2.0 * (w * x + y * z)
+        cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+        self.roll = np.arctan2(sinr_cosp, cosr_cosp)
+
+        # Pitch (rotation around Y-axis)
+        sinp = 2.0 * (w * y - z * x)
+        if abs(sinp) >= 1:
+            self.pitch = np.pi / 2 * np.sign(sinp)  # Use 90 degrees if out of range
+        else:
+            self.pitch = np.arcsin(sinp)
+
+        # Yaw (rotation around Z-axis)
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        self.yaw = np.arctan2(siny_cosp, cosy_cosp)
+        if dt > 0:
+            ax = msg.linear_acceleration.x
+            ay = msg.linear_acceleration.y
+            self.prediction(0.5* ax*dt**2, 0.5*ay*dt**2) # control input
+        self.last_imu_ts = ts
 
     def prediction(self, dx, dy):
         self.mu[0] += dx
@@ -93,74 +152,153 @@ class EKFSLAM:
     def try_measure(self):
         if self.rgb_ts is None or self.depth_ts is None:
             return
-        if abs(self.rgb_ts - self.depth_ts) > 0.1:
+        if abs(self.rgb_ts - self.depth_ts) > 0.05:
             return
-        self.measurement()
+        threshold = 0.03490658503/2
+        if abs(self.roll) < threshold and abs(self.pitch) < threshold:
+            self.measurement()
+        # self.measurement()
 
+    # def measurement(self):
+    #     gray = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2GRAY)
+    #     kps, des = self.orb.detectAndCompute(gray, None)
+    #     if kps is None or len(kps) == 0:
+    #         return
+    #     # initialize landmarks
+    #     if self.num_landmarks == 0:
+    #         self.add_landmarks(kps, des)
+    #         return
+
+    #     # match descriptors
+    #     matches = self.bf.knnMatch(self.landmark_desc[:self.num_landmarks], des, k=2)
+    #     good = [m for m,n in matches if m.distance < 0.75 * n.distance]
+    #     if not good:
+    #         return
+    #     # prepare for RANSAC
+    #     pts1 = np.float32([ self.landmark_kps[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
+    #     pts2 = np.float32([ kps[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
+    #     F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, 3.0)
+    #     if mask is None:
+    #         inliers = []
+    #     else:
+    #         inliers = [good[i] for i in range(len(good)) if mask[i,0] == 1]
+
+    #     matched_train = set()
+    #     for m in inliers:
+    #         matched_train.add(m.trainIdx)
+    #         u, v = kps[m.trainIdx].pt
+    #         d = float(self.depth_img[int(v), int(u)])
+    #         if d <= 0:
+    #             continue
+    #         p_robot = self.back_project(u, v, d)[:2].reshape(2,1)
+
+    #         # predicted measurement
+    #         lm_w = self.landmarks_pts[m.queryIdx].reshape(2,1)
+    #         delta = lm_w - self.mu[0:2]
+    #         z_hat = self.R_wr @ delta
+    #         z_meas = p_robot
+
+    #         # print(f"Inlier landmark {m.queryIdx}: z_hat={z_hat.flatten()}, z_meas={z_meas.flatten()}")
+
+    #         # build H
+    #         state_dim = self.Sigma.shape[0]
+    #         H = np.zeros((2, state_dim), dtype=np.float32)
+    #         H[:,0:2] = -self.R_wr
+    #         idx = 2 + 2*m.queryIdx
+    #         H[:, idx:idx+2] = self.R_wr
+
+    #         # EKF update
+    #         Rm = np.eye(2) * self.R_meas_var
+    #         S = H @ self.Sigma @ H.T + Rm
+    #         K = self.Sigma @ H.T @ np.linalg.inv(S)
+    #         y = z_meas - z_hat
+    #         self.mu = (self.mu.flatten() + (K @ y).flatten()).reshape(-1,1)
+    #         I = np.eye(state_dim, dtype=np.float32)
+    #         self.Sigma = (I - K @ H) @ self.Sigma
+    #         self.Sigma = (self.Sigma + self.Sigma.T) * 0.5
+    #         print("num_landmarks:", self.num_landmarks)
+    #         print(f"Post-update mu={self.mu[:2].flatten()}")
+
+    #     # add new landmarks for unmatched keypoints
+    #     new_kps = [kp for i,kp in enumerate(kps) if i not in matched_train]
+    #     new_des = [des[i] for i in range(len(des)) if i not in matched_train]
+    #     if new_kps:
+    #         self.add_landmarks(new_kps, np.array(new_des))
     def measurement(self):
         gray = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2GRAY)
         kps, des = self.orb.detectAndCompute(gray, None)
         if kps is None or len(kps) == 0:
             return
-        # initialize landmarks
+
+        # initialise map if empty
         if self.num_landmarks == 0:
             self.add_landmarks(kps, des)
             return
 
-        # match descriptors
+        # 1) descriptor matching (ratio-test)
         matches = self.bf.knnMatch(self.landmark_desc[:self.num_landmarks], des, k=2)
-        good = [m for m,n in matches if m.distance < 0.75 * n.distance]
+        good = [m for m, n in matches if m.distance < 0.75 * n.distance]
         if not good:
             return
-        # prepare for RANSAC
-        pts1 = np.float32([ self.landmark_kps[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
-        pts2 = np.float32([ kps[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
-        F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, 3.0)
-        if mask is None:
-            inliers = []
-        else:
-            inliers = [good[i] for i in range(len(good)) if mask[i,0] == 1]
+
+        # 2) RANSAC on image correspondences
+        pts1 = np.float32([self.landmark_kps[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+        pts2 = np.float32([kps[m.trainIdx].pt              for m in good]).reshape(-1, 1, 2)
+        _, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, 3.0)
+        inliers = [good[i] for i in range(len(good)) if mask is not None and mask[i, 0]]
+
+        if len(inliers) == 0:
+            return
+
+        # 3) build stacked residual y and Jacobian H
+        state_dim = self.Sigma.shape[0]
+        m = len(inliers)                         # number of inlier landmarks
+        H = np.zeros((2 * m, state_dim), np.float32)
+        y = np.zeros((2 * m, 1),      np.float32)
+        R_block = np.eye(2 * m,      dtype=np.float32) * self.R_meas_var
 
         matched_train = set()
-        for m in inliers:
-            matched_train.add(m.trainIdx)
-            u, v = kps[m.trainIdx].pt
+        for j, m_obj in enumerate(inliers):
+            qid, tid = m_obj.queryIdx, m_obj.trainIdx
+            matched_train.add(tid)
+
+            # 3-a) measurement in robot frame (pixel → metric)
+            u, v = kps[tid].pt
             d = float(self.depth_img[int(v), int(u)])
             if d <= 0:
                 continue
-            p_robot = self.back_project(u, v, d)[:2].reshape(2,1)
+            z_meas = self.back_project(u, v, d)[:2].reshape(2, 1)
 
-            # predicted measurement
-            lm_w = self.landmarks_pts[m.queryIdx].reshape(2,1)
-            delta = lm_w - self.mu[0:2]
-            z_hat = self.R_wr @ delta
-            z_meas = p_robot
+            # 3-b) predicted measurement from state
+            lm_w   = self.landmarks_pts[qid].reshape(2, 1)
+            delta  = lm_w - self.mu[0:2]             # world frame
+            z_hat  = self.R_wr @ delta               # robot frame
 
-            print(f"Inlier landmark {m.queryIdx}: z_hat={z_hat.flatten()}, z_meas={z_meas.flatten()}")
+            # 3-c) residual
+            y[2*j:2*j+2, 0] = (z_meas - z_hat).flatten()
 
-            # build H
-            state_dim = self.Sigma.shape[0]
-            H = np.zeros((2, state_dim), dtype=np.float32)
-            H[:,0:2] = -self.R_wr
-            idx = 2 + 2*m.queryIdx
-            H[:, idx:idx+2] = self.R_wr
+            # 3-d) Jacobian rows
+            Hblock = np.hstack((-self.R_wr,          # ∂z/∂x, ∂z/∂y
+                                np.zeros((2,1), np.float32)))  # no θ term (orientation fixed)
+            H[2*j:2*j+2, 0:3] = Hblock
+            idx = 2 + 2*qid                          # landmark start column in Σ
+            H[2*j:2*j+2, idx:idx+2] = self.R_wr
 
-            # EKF update
-            Rm = np.eye(2) * self.R_meas_var
-            S = H @ self.Sigma @ H.T + Rm
-            K = self.Sigma @ H.T @ np.linalg.inv(S)
-            y = z_meas - z_hat
-            self.mu = (self.mu.flatten() + (K @ y).flatten()).reshape(-1,1)
-            I = np.eye(state_dim, dtype=np.float32)
-            self.Sigma = (I - K @ H) @ self.Sigma
-            self.Sigma = (self.Sigma + self.Sigma.T) * 0.5
-            print(f"Post-update mu={self.mu[:2].flatten()}")
-
-        # add new landmarks for unmatched keypoints
-        new_kps = [kp for i,kp in enumerate(kps) if i not in matched_train]
-        new_des = [des[i] for i in range(len(des)) if i not in matched_train]
+        # 4) EKF update with all inliers at once
+        S = H @ self.Sigma @ H.T + R_block
+        K = self.Sigma @ H.T @ np.linalg.inv(S)
+        self.mu    = self.mu + K @ y
+        I          = np.eye(state_dim, dtype=np.float32)
+        self.Sigma = (I - K @ H) @ self.Sigma
+        self.Sigma = 0.5 * (self.Sigma + self.Sigma.T)   # numerical symmetry
+        print("num_landmarks:", self.num_landmarks)
+        print(f"[EKF] upd: {m} inliers  | pose = {self.mu[:2,0]}")
+        # ------------------------------------------------------------
+        # 5) add new landmarks that were not matched
+        new_kps  = [kp  for i, kp  in enumerate(kps) if i not in matched_train]
+        new_des  = [des for i, des in enumerate(des) if i not in matched_train]
         if new_kps:
-            self.add_landmarks(new_kps, np.array(new_des))
+            self.add_landmarks(new_kps, np.array(new_des, dtype=np.uint8))
 
     def add_landmarks(self, kps, des):
         for kp, desc in zip(kps, des):

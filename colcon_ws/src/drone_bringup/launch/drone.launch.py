@@ -39,7 +39,14 @@ def generate_launch_description():
         Node(
             package='rqt_image_view',
             executable='rqt_image_view',
-        )
+        ),
+        Node(
+            package='ros_gz_bridge',
+            executable='parameter_bridge',
+            arguments=['/world/iris_runway/model/iris_with_depth_camera/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu@sensor_msgs/msg/Imu[gz.msgs.IMU'
+            ],
+            output='screen'
+        ),
 
 
     ])
