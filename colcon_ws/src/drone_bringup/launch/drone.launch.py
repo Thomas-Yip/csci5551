@@ -11,7 +11,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
 
     drone_description = get_package_share_directory('drone_description')
-    world_file = os.path.join(drone_description, 'worlds', 'sand.world')
+    world_file = os.path.join(drone_description, 'worlds', 'sand.worldwf')
     drone_bringup = get_package_share_directory('drone_bringup')
     mavros_params_file = os.path.join(drone_bringup, 'params', 'sim_mavros_params.yaml')
 

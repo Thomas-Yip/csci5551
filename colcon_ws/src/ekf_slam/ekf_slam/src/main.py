@@ -67,8 +67,8 @@ class Main(Node):
         # rgb_img, depth_img = self.rgbd_sub.get_rgbd_image()
         self.cur_odom, self.past_odom = self.odom_sub.get_odom()
         # self.ekf_slam.update_rgbd_img(rgb_img.copy(), depth_img.copy())
-        # self.debug_img = self.ekf_slam.get_debug_img()
-        # self.debug_pub.publish(self.bridge.cv2_to_imgmsg(self.debug_img, encoding='bgr8'))
+        self.debug_img = self.ekf_slam.get_debug_img()
+        self.debug_pub.publish(self.bridge.cv2_to_imgmsg(self.debug_img, encoding='bgr8'))
 
 def main(args=None):
     rclpy.init(args=args)

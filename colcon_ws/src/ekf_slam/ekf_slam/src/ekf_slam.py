@@ -11,6 +11,8 @@ from aruco_marker import ArucoMarker
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 import matplotlib.pyplot as plt
+import time
+import csv
 
 MAX_FEATURES = 16
 MAX_LANDMARKS = 512
@@ -66,6 +68,8 @@ class EKFSLAM:
         self.node.create_subscription(Odometry, '/mavros/local_position/odom', self.odom_cb, qos)
         self.node.create_subscription(Imu, '/world/iris_runway/model/iris_with_depth_camera/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu', self.imu_cb, qos)
         self.vel_sub = self.node.create_subscription(TwistStamped,'/mavros/local_position/velocity_local',self.vel_callback,qos)
+        self.pose_sub = self.node.create_subscription(PoseStamped,'/mavros/local_position/pose',self.pose_callback,qos)
+
         self.last_vel_ts = None
         self.last_imu_ts = None
         self.detected_markers = None
@@ -75,8 +79,22 @@ class EKFSLAM:
         self.debug_img = np.zeros((360, 640, 3), dtype=np.uint8)
         self.fig = plt.figure()
         self.ax = self.fig.add_subplot(111, projection='3d')
+        self.pure_imu_estimate = np.zeros((3, 1), dtype=np.float32)
+        self.pose = np.zeros((3, 1), dtype=np.float32)
         plt.ion()
         plt.show()
+
+        self.history_slam = []   # EKF-SLAM poses
+        self.history_imu = []    # pure IMU dead-reckoning
+        self.history_gps = []    # IMU-GPS fused poses
+
+        self.once = False
+
+
+    def pose_callback(self, msg: PoseStamped):
+        self.pose[0] = msg.pose.position.x
+        self.pose[1] = msg.pose.position.y
+        self.pose[2] = msg.pose.position.z
 
     def vel_callback(self, msg):
         ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -96,6 +114,13 @@ class EKFSLAM:
             # v_world = self.R_bw @ v_body
             # self.prediction(v_body[0]*dt, v_body[1]*dt) # control input
         self.last_vel_ts = ts
+        # self.pure_imu_estimate[0] = self.pure_imu_estimate[0] + vx*dt
+        # self.pure_imu_estimate[1] = self.pure_imu_estimate[1] + vy*dt
+        # print("imu:", self.pure_imu_estimate[:2])
+        # if abs(self.pose[0] - 20) < 0.5 and abs(self.pose[1] - 20) < 0.5 and not self.once:
+        #     print('export csv')
+        #     self.plot_trajectories_and_error()
+        #     self.once = True
 
     def odom_cb(self, msg: Odometry):
         x, y = msg.pose.pose.position.x, msg.pose.pose.position.y
@@ -131,15 +156,27 @@ class EKFSLAM:
         siny_cosp = 2.0 * (w * z + x * y)
         cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
         self.yaw = np.arctan2(siny_cosp, cosy_cosp)
+        ax = msg.linear_acceleration.x
+        ay = msg.linear_acceleration.y
         if dt > 0:
-            ax = msg.linear_acceleration.x
-            ay = msg.linear_acceleration.y
             self.prediction(0.5* ax*dt**2, 0.5*ay*dt**2) # control input
         self.last_imu_ts = ts
+        # self.pure_imu_estimate[0] = self.pure_imu_estimate[0] + 0.5*ax*dt**2
+        # self.pure_imu_estimate[1] = self.pure_imu_estimate[1] + 0.5*ay*dt**2
+        # # print(0.5*ax*dt**2, 0.5*ay*dt**2)
+        # print("imu:", self.pure_imu_estimate[:2])
+        # # print("imu:", self.pure_imu_estimate[:2])
+        # if abs(self.pose[0] - 20) < 0.5 and abs(self.pose[1] - 20) < 0.5 and not self.once:
+        #     print('export csv')
+        #     self.plot_trajectories_and_error()
+        #     self.once = True
 
     def prediction(self, dx, dy):
         self.mu[0] += dx
         self.mu[1] += dy
+        self.pure_imu_estimate[0] += dx
+        self.pure_imu_estimate[1] += dy
+
         dim = self.Sigma.shape[0]
         Q_big = np.zeros((dim, dim), dtype=np.float32)
         Q_big[0:2, 0:2] = self.Q_motion
@@ -148,7 +185,6 @@ class EKFSLAM:
     def rgb_cb(self, msg: Image):
         self.rgb_img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         self.rgb_ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        # self.detected_markers = self.aruco_marker.detect_aruco_markers(self.rgb_img)
         self.try_measure()
 
     def depth_cb(self, msg: Image):
@@ -170,42 +206,22 @@ class EKFSLAM:
     def measurement(self):
         gray = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2GRAY)
         tuple_kps, des = self.orb.detectAndCompute(gray, None)
+        self.debug_img = cv2.drawKeypoints(self.rgb_img, tuple_kps, None, color=(0, 255, 0), flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
         kps = list(tuple_kps)
         if kps is None or len(kps) == 0:
             return
-        
-        # if(self.detected_markers):
-        #     keep_mask = [True] * len(kps)
-        #     for idx, kp in enumerate(kps):
-        #         for m in self.detected_markers:
-        #             if self.inside_marker(kp.pt, m):
-        #                 keep_mask[idx] = False
-        #                 break                # no need to test other markers
-
-        #     # Apply the mask **once**
-        #     kps = [kp for kp, keep in zip(kps, keep_mask) if keep]
-        #     des = des[keep_mask]
-        
+    
         # initialise map if empty
         if self.num_landmarks == 0:
             self.add_landmarks(kps, des)
             return       
-        print(des.shape)
-        print(len(kps))
+        # print(des.shape)
+        # print(len(kps))
         # 1) descriptor matching (ratio-test)
-        print('kps length: ', len(kps))
+        # print('kps length: ', len(kps))
         matches = self.bf.knnMatch(self.landmark_desc[:self.num_landmarks], des, k=2)
         good = [m for m, n in matches if m.distance < 0.75 * n.distance]
-        # good = []
-        # for pair in matches:              # each 'pair' is a list!
-        #     if len(pair) < 2:
-        #         continue                  # not enough neighbours → skip
-        #     m, n = pair
-        #     if m.distance < 0.75 * n.distance:
-        #         good.append(m)
-        # if not good:
-        #     return
-
+    
         # 2) RANSAC on image correspondences
         pts1 = np.float32([self.landmark_kps[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
         pts2 = np.float32([kps[m.trainIdx].pt              for m in good]).reshape(-1, 1, 2)
@@ -257,14 +273,69 @@ class EKFSLAM:
         self.Sigma = (I - K @ H) @ self.Sigma
         self.Sigma = 0.5 * (self.Sigma + self.Sigma.T)   # numerical symmetry
         self.update_plot(self.landmarks_pts[:self.num_landmarks].T)
-        print("num_landmarks:", self.num_landmarks)
-        print(f"[EKF] upd: {m} inliers  | pose = {self.mu[:2,0]}")
+        # print("num_landmarks:", self.num_landmarks)
+        print('Robot pose relative to world frame: X, Y')
+        print(f"IMU-RGBD EKF SlAM: {self.mu[:2,0]}")
+        print(f'IMU-based Dead Reckoning: {self.pure_imu_estimate[:2,0]}')
+        print(f'IMU-GPS-based position estimation: {self.pose[:2,0]}')
+        # after you update self.mu, self.pure_imu_estimate and self.pose:
+        self.history_slam.append(self.mu[:2,0].copy())
+        self.history_imu.append(self.pure_imu_estimate[:2,0].copy())
+        self.history_gps.append(self.pose[:2,0].copy())
+        # print('Error')
         # ------------------------------------------------------------
         # 5) add new landmarks that were not matched
         new_kps  = [kp  for i, kp  in enumerate(kps) if i not in matched_train]
         new_des  = [des for i, des in enumerate(des) if i not in matched_train]
         if new_kps:
             self.add_landmarks(new_kps, np.array(new_des, dtype=np.uint8))
+
+        if abs(self.pose[0] - 10) < 0.5 and abs(self.pose[1] - 10) < 0.5 and not self.once:
+            self.plot_trajectories_and_error()
+            self.once = True
+            # time.sleep(60)
+            
+        
+        
+    def plot_trajectories_and_error(self):
+        # import numpy as np
+        # import matplotlib.pyplot as plt
+
+        # Stack into (N×2) arrays
+        slam_arr = np.vstack(self.history_slam)
+        imu_arr  = np.vstack(self.history_imu)
+        gps_arr  = np.vstack(self.history_gps)
+
+        # 1) Mean Euclidean error between SLAM and IMU-GPS
+        errors = np.linalg.norm(slam_arr - gps_arr, axis=1)
+        mean_err = errors.mean()
+        # print(f"Mean SLAM vs IMU-GPS error: {mean_err:.3f} units")
+        with open('slam.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['x', 'y'])
+            for i in range(len(slam_arr)):
+                writer.writerow([slam_arr[i, 0], slam_arr[i, 1]])
+        with open('imu.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['x', 'y'])
+            for i in range(len(imu_arr)):
+                writer.writerow([imu_arr[i, 0], imu_arr[i, 1]])
+        with open('gps.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['x', 'y'])
+            for i in range(len(gps_arr)):
+                writer.writerow([gps_arr[i, 0], gps_arr[i, 1]])
+
+        # # 2) Plot all three trajectories
+        # plt.figure()
+        # plt.plot(slam_arr[:,0], slam_arr[:,1],      label='EKF-SLAM')
+        # plt.plot(imu_arr[:,0],  imu_arr[:,1],       label='IMU Dead Reckoning')
+        # plt.plot(gps_arr[:,0],  gps_arr[:,1],       label='IMU-GPS')
+        # plt.legend()
+        # plt.xlabel('X position')
+        # plt.ylabel('Y position')
+        # plt.title(f"Trajectories (mean SLAM error = {mean_err:.3f})")
+        # plt.show()
 
     def add_landmarks(self, kps, des):
         for kp, desc in zip(kps, des):
