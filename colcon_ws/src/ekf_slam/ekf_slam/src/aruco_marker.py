@@ -21,22 +21,24 @@ class ArucoMarker:
         corners, ids, rejected = cv2.aruco.detectMarkers(gray, self.aruco_dict, parameters=self.parameters)
 
         if ids is not None:
-            # Estimate pose of each marker
-            # marker_length is the real-world size of marker's side in meters
-            marker_length = 1.0  # for example, 15 cm marker
+    
+            marker_length = 0.5  # for example, 15 cm marker
 
             rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, marker_length, self.camera_matrix, self.dist_coeffs)
             return_markers = []
             for i in range(len(ids)):
                 rvec = rvecs[i][0]  # Rotation vector
                 tvec = tvecs[i][0]  # Translation vector
-                return_markers.append((ids[i][0], rvec, tvec))
+                pts = corners[i][0]
+                centre = pts.mean(axis=0)
+                return_markers.append({
+                    'id':ids[i][0], 
+                    'rvec': rvec,
+                    'tvec': tvec,
+                    'corners_px': pts,
+                    'centre_px': centre})   
+                # print(f"Marker ID: {ids[i][0]}, rvec: {rvec}, tvec: {tvec}, corners: {pts}, centre: {centre}")        
             return return_markers
         else:
             return None
-                # print(f"Marker ID {ids[i][0]} pose:")
-                # print(f"  Translation: x={tvec[0]:.2f}, y={tvec[1]:.2f}, z={tvec[2]:.2f}")
-                # print(f"  Rotation vector: {rvec}")
-
-                # # You can also draw the pose on the image:
-                # cv2.aruco.drawAxis(rgb_img, self.camera_matrix, self.dist_coeffs, rvec, tvec, marker_length * 0.5)
+               

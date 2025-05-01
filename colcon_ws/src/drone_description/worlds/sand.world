@@ -121,18 +121,25 @@
     </include>
 
     <include>
-      <uri>model://aruco_markers/marker0</uri>
-      <pose degrees="true">5 0.0 0.0 0 90  0</pose>
+      <uri>model://dummies/white_dummy</uri>
+      <pose degrees="true">5 0.0 0.0 0 0  90</pose>
     </include>
 
     <include>
-      <uri>model://aruco_markers/marker1</uri>
-      <pose degrees="true">10 0.0 0.1 0 90  0</pose>
+      <uri>model://dummies/black_dummy</uri>
+      <pose degrees="true">10 0.0 0.1 0 0  0</pose>
     </include>
 
     <include>
-      <uri>model://aruco_markers/marker2</uri>
-      <pose degrees="true">0 -5 0.0 0 90  0</pose>
+      <uri>model://dummies/red_dummy</uri>
+      <pose degrees="true">0 -5 0.0 0 0  0</pose>
     </include>
+
+        <include>
+      <uri>model://dummies/blue_dummy</uri>
+      <pose degrees="true">0 -10 0.0 0 0  0</pose>
+    </include>
+
+
   </world>
 </sdf>

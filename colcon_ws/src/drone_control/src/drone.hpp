@@ -74,7 +74,7 @@ private:
 
   // Extended list of waypoints for slower motion:
   static constexpr int total_setpoints = 13;
-  float setPoints[total_setpoints][3] = {
+  float setPoints[23][3] = {
     // Takeoff to 10m
     // { 0.0f,  0.0f, 10.0f},
     // // Outbound path in 1m steps
@@ -102,8 +102,17 @@ private:
     {7.75f, 0.0f, 10.0f},
     {8.75f, 0.0f, 10.0f},
     {9.75f, 0.0f, 10.0f},
-    {10.0f, 0.0f, 10.0f},
-
+    {10.75f, 0.0f, 10.0f},
+    {11.75f, 0.0f, 10.0f},
+    {12.75f, 0.0f, 10.0f},
+    {13.75f, 0.0f, 10.0f},
+    {14.75f, 0.0f, 10.0f},
+    {15.75f, 0.0f, 10.0f},
+    {16.75f, 0.0f, 10.0f},
+    {17.75f, 0.0f, 10.0f},
+    {18.75f, 0.0f, 10.0f},
+    {19.75f, 0.0f, 10.0f},
+    {20.0f, 0.0f, 10.0f}
   };
 
   int current_setpoint_ind = 0;

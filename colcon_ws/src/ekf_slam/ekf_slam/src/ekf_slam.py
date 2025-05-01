@@ -10,6 +10,7 @@ from sensor_msgs.msg import Image
 from aruco_marker import ArucoMarker
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
+import matplotlib.pyplot as plt
 
 MAX_FEATURES = 16
 MAX_LANDMARKS = 512
@@ -67,10 +68,15 @@ class EKFSLAM:
         self.vel_sub = self.node.create_subscription(TwistStamped,'/mavros/local_position/velocity_local',self.vel_callback,qos)
         self.last_vel_ts = None
         self.last_imu_ts = None
-
+        self.detected_markers = None
         self.yaw = 0.0
         self.roll = 0.0
         self.pitch = 0.0
+        self.debug_img = np.zeros((360, 640, 3), dtype=np.uint8)
+        self.fig = plt.figure()
+        self.ax = self.fig.add_subplot(111, projection='3d')
+        plt.ion()
+        plt.show()
 
     def vel_callback(self, msg):
         ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -142,104 +148,63 @@ class EKFSLAM:
     def rgb_cb(self, msg: Image):
         self.rgb_img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         self.rgb_ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        # self.detected_markers = self.aruco_marker.detect_aruco_markers(self.rgb_img)
         self.try_measure()
 
     def depth_cb(self, msg: Image):
         self.depth_img = self.bridge.imgmsg_to_cv2(msg, '32FC1')
         self.depth_ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        self.try_measure()
+        # self.try_measure()
 
     def try_measure(self):
         if self.rgb_ts is None or self.depth_ts is None:
             return
         if abs(self.rgb_ts - self.depth_ts) > 0.05:
             return
-        threshold = 0.03490658503/2
+        
+        threshold = 0.03490658503/2 # if < 2 degress, then do measurement
+        
         if abs(self.roll) < threshold and abs(self.pitch) < threshold:
             self.measurement()
-        # self.measurement()
 
-    # def measurement(self):
-    #     gray = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2GRAY)
-    #     kps, des = self.orb.detectAndCompute(gray, None)
-    #     if kps is None or len(kps) == 0:
-    #         return
-    #     # initialize landmarks
-    #     if self.num_landmarks == 0:
-    #         self.add_landmarks(kps, des)
-    #         return
-
-    #     # match descriptors
-    #     matches = self.bf.knnMatch(self.landmark_desc[:self.num_landmarks], des, k=2)
-    #     good = [m for m,n in matches if m.distance < 0.75 * n.distance]
-    #     if not good:
-    #         return
-    #     # prepare for RANSAC
-    #     pts1 = np.float32([ self.landmark_kps[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
-    #     pts2 = np.float32([ kps[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
-    #     F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, 3.0)
-    #     if mask is None:
-    #         inliers = []
-    #     else:
-    #         inliers = [good[i] for i in range(len(good)) if mask[i,0] == 1]
-
-    #     matched_train = set()
-    #     for m in inliers:
-    #         matched_train.add(m.trainIdx)
-    #         u, v = kps[m.trainIdx].pt
-    #         d = float(self.depth_img[int(v), int(u)])
-    #         if d <= 0:
-    #             continue
-    #         p_robot = self.back_project(u, v, d)[:2].reshape(2,1)
-
-    #         # predicted measurement
-    #         lm_w = self.landmarks_pts[m.queryIdx].reshape(2,1)
-    #         delta = lm_w - self.mu[0:2]
-    #         z_hat = self.R_wr @ delta
-    #         z_meas = p_robot
-
-    #         # print(f"Inlier landmark {m.queryIdx}: z_hat={z_hat.flatten()}, z_meas={z_meas.flatten()}")
-
-    #         # build H
-    #         state_dim = self.Sigma.shape[0]
-    #         H = np.zeros((2, state_dim), dtype=np.float32)
-    #         H[:,0:2] = -self.R_wr
-    #         idx = 2 + 2*m.queryIdx
-    #         H[:, idx:idx+2] = self.R_wr
-
-    #         # EKF update
-    #         Rm = np.eye(2) * self.R_meas_var
-    #         S = H @ self.Sigma @ H.T + Rm
-    #         K = self.Sigma @ H.T @ np.linalg.inv(S)
-    #         y = z_meas - z_hat
-    #         self.mu = (self.mu.flatten() + (K @ y).flatten()).reshape(-1,1)
-    #         I = np.eye(state_dim, dtype=np.float32)
-    #         self.Sigma = (I - K @ H) @ self.Sigma
-    #         self.Sigma = (self.Sigma + self.Sigma.T) * 0.5
-    #         print("num_landmarks:", self.num_landmarks)
-    #         print(f"Post-update mu={self.mu[:2].flatten()}")
-
-    #     # add new landmarks for unmatched keypoints
-    #     new_kps = [kp for i,kp in enumerate(kps) if i not in matched_train]
-    #     new_des = [des[i] for i in range(len(des)) if i not in matched_train]
-    #     if new_kps:
-    #         self.add_landmarks(new_kps, np.array(new_des))
     def measurement(self):
         gray = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2GRAY)
-        kps, des = self.orb.detectAndCompute(gray, None)
+        tuple_kps, des = self.orb.detectAndCompute(gray, None)
+        kps = list(tuple_kps)
         if kps is None or len(kps) == 0:
             return
+        
+        # if(self.detected_markers):
+        #     keep_mask = [True] * len(kps)
+        #     for idx, kp in enumerate(kps):
+        #         for m in self.detected_markers:
+        #             if self.inside_marker(kp.pt, m):
+        #                 keep_mask[idx] = False
+        #                 break                # no need to test other markers
 
+        #     # Apply the mask **once**
+        #     kps = [kp for kp, keep in zip(kps, keep_mask) if keep]
+        #     des = des[keep_mask]
+        
         # initialise map if empty
         if self.num_landmarks == 0:
             self.add_landmarks(kps, des)
-            return
-
+            return       
+        print(des.shape)
+        print(len(kps))
         # 1) descriptor matching (ratio-test)
+        print('kps length: ', len(kps))
         matches = self.bf.knnMatch(self.landmark_desc[:self.num_landmarks], des, k=2)
         good = [m for m, n in matches if m.distance < 0.75 * n.distance]
-        if not good:
-            return
+        # good = []
+        # for pair in matches:              # each 'pair' is a list!
+        #     if len(pair) < 2:
+        #         continue                  # not enough neighbours → skip
+        #     m, n = pair
+        #     if m.distance < 0.75 * n.distance:
+        #         good.append(m)
+        # if not good:
+        #     return
 
         # 2) RANSAC on image correspondences
         pts1 = np.float32([self.landmark_kps[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
@@ -249,7 +214,7 @@ class EKFSLAM:
 
         if len(inliers) == 0:
             return
-
+   
         # 3) build stacked residual y and Jacobian H
         state_dim = self.Sigma.shape[0]
         m = len(inliers)                         # number of inlier landmarks
@@ -291,6 +256,7 @@ class EKFSLAM:
         I          = np.eye(state_dim, dtype=np.float32)
         self.Sigma = (I - K @ H) @ self.Sigma
         self.Sigma = 0.5 * (self.Sigma + self.Sigma.T)   # numerical symmetry
+        self.update_plot(self.landmarks_pts[:self.num_landmarks].T)
         print("num_landmarks:", self.num_landmarks)
         print(f"[EKF] upd: {m} inliers  | pose = {self.mu[:2,0]}")
         # ------------------------------------------------------------
@@ -332,7 +298,27 @@ class EKFSLAM:
         Y = (v - self.cy) * d / self.fy
         return np.array([X, Y, d], dtype=np.float32)
 
+    def update_plot(self, points3D):
+        self.ax.clear()
+        self.ax.scatter(points3D[0], points3D[1], 0, color='green')
+        self.ax.set_xlabel('X')
+        self.ax.set_ylabel('Y')
+        self.ax.set_zlabel('Z')
+        plt.draw()
+        plt.pause(0.001)
 
+    def inside_marker(self,pt, marker):
+        # print('exe inside marker')
+        c = marker["corners_px"]          
+        # xmin, xmax = c[:, 0].min(), c[:, 0].max()
+        # ymin, ymax = c[:, 1].min(), c[:, 1].max()
+        # x, y = pt
+        # return xmin <= x <= xmax and ymin <= y <= ymax
+        return cv2.pointPolygonTest(c, pt, measureDist=False) >= 0
+    def get_debug_img(self):
+        return self.debug_img
+
+    # def rm_marker_pts(self, )
 
 # #!/usr/bin/env python3
 # import rclpy
@@ -621,3 +607,71 @@ class EKFSLAM:
     
 #     def get_debug_img(self):
 #         return self.debug_img
+
+
+
+# def measurement(self):
+    #     gray = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2GRAY)
+    #     kps, des = self.orb.detectAndCompute(gray, None)
+    #     if kps is None or len(kps) == 0:
+    #         return
+    #     # initialize landmarks
+    #     if self.num_landmarks == 0:
+    #         self.add_landmarks(kps, des)
+    #         return
+
+    #     # match descriptors
+    #     matches = self.bf.knnMatch(self.landmark_desc[:self.num_landmarks], des, k=2)
+    #     good = [m for m,n in matches if m.distance < 0.75 * n.distance]
+    #     if not good:
+    #         return
+    #     # prepare for RANSAC
+    #     pts1 = np.float32([ self.landmark_kps[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
+    #     pts2 = np.float32([ kps[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
+    #     F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_RANSAC, 3.0)
+    #     if mask is None:
+    #         inliers = []
+    #     else:
+    #         inliers = [good[i] for i in range(len(good)) if mask[i,0] == 1]
+
+    #     matched_train = set()
+    #     for m in inliers:
+    #         matched_train.add(m.trainIdx)
+    #         u, v = kps[m.trainIdx].pt
+    #         d = float(self.depth_img[int(v), int(u)])
+    #         if d <= 0:
+    #             continue
+    #         p_robot = self.back_project(u, v, d)[:2].reshape(2,1)
+
+    #         # predicted measurement
+    #         lm_w = self.landmarks_pts[m.queryIdx].reshape(2,1)
+    #         delta = lm_w - self.mu[0:2]
+    #         z_hat = self.R_wr @ delta
+    #         z_meas = p_robot
+
+    #         # print(f"Inlier landmark {m.queryIdx}: z_hat={z_hat.flatten()}, z_meas={z_meas.flatten()}")
+
+    #         # build H
+    #         state_dim = self.Sigma.shape[0]
+    #         H = np.zeros((2, state_dim), dtype=np.float32)
+    #         H[:,0:2] = -self.R_wr
+    #         idx = 2 + 2*m.queryIdx
+    #         H[:, idx:idx+2] = self.R_wr
+
+    #         # EKF update
+    #         Rm = np.eye(2) * self.R_meas_var
+    #         S = H @ self.Sigma @ H.T + Rm
+    #         K = self.Sigma @ H.T @ np.linalg.inv(S)
+    #         y = z_meas - z_hat
+    #         self.mu = (self.mu.flatten() + (K @ y).flatten()).reshape(-1,1)
+    #         I = np.eye(state_dim, dtype=np.float32)
+    #         self.Sigma = (I - K @ H) @ self.Sigma
+    #         self.Sigma = (self.Sigma + self.Sigma.T) * 0.5
+    #         print("num_landmarks:", self.num_landmarks)
+    #         print(f"Post-update mu={self.mu[:2].flatten()}")
+
+    #     # add new landmarks for unmatched keypoints
+    #     new_kps = [kp for i,kp in enumerate(kps) if i not in matched_train]
+    #     new_des = [des[i] for i in range(len(des)) if i not in matched_train]
+    #     if new_kps:
+    #         self.add_landmarks(new_kps, np.array(new_des))

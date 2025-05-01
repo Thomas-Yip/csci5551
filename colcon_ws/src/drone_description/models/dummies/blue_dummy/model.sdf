@@ -1,12 +1,14 @@
 <?xml version="1.0" ?><sdf version="1.6">
-  <model name="Marker0">
+  <model name="blue_dummy">
     <static>true</static>
     <link name="link">
       <visual name="visual">
         <geometry>
           <mesh>
-            <uri>model://aruco_markers/marker0/meshes/Marker0.dae</uri>
-          <scale>1.0 1.0 1.0</scale></mesh>
+            <uri>model://dummies/blue_dummy/meshes/red_dummy.dae</uri>
+            <scale>0.1 0.1 0.01</scale>
+                      </mesh>
+
         </geometry>
       </visual>
     </link>
