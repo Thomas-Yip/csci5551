@@ -11,6 +11,7 @@ from aruco_marker import ArucoMarker
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 import matplotlib.pyplot as plt
+from tf_transformations import quaternion_matrix
 import time
 import csv
 
@@ -67,9 +68,8 @@ class EKFSLAM:
         self.node.create_subscription(Image, depth_topic, self.depth_cb, qos)
         self.node.create_subscription(Odometry, '/mavros/local_position/odom', self.odom_cb, qos)
         self.node.create_subscription(Imu, '/world/iris_runway/model/iris_with_depth_camera/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu', self.imu_cb, qos)
-        self.vel_sub = self.node.create_subscription(TwistStamped,'/mavros/local_position/velocity_local',self.vel_callback,qos)
         self.pose_sub = self.node.create_subscription(PoseStamped,'/mavros/local_position/pose',self.pose_callback,qos)
-
+        self.final_dest_sub = self.node.create_subscription(PoseStamped,'/drone/final_dest',self.final_dest_cb,qos)
         self.last_vel_ts = None
         self.last_imu_ts = None
         self.detected_markers = None
@@ -87,41 +87,20 @@ class EKFSLAM:
         self.history_slam = []   # EKF-SLAM poses
         self.history_imu = []    # pure IMU dead-reckoning
         self.history_gps = []    # IMU-GPS fused poses
-
+        self.vel = np.zeros((3, 1), dtype=np.float32)
         self.once = False
 
+        self.final_dest = None
+
+    def final_dest_cb(self, msg: PoseStamped):
+        self.final_dest = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]).reshape(-1,1)
+        # print("final_des:", self.final_des)
 
     def pose_callback(self, msg: PoseStamped):
         self.pose[0] = msg.pose.position.x
         self.pose[1] = msg.pose.position.y
         self.pose[2] = msg.pose.position.z
-
-    def vel_callback(self, msg):
-        ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if self.last_vel_ts is None:
-            self.last_vel_ts = ts
-            return  # Skip first frame, because we have no delta_t yet
-        dt = ts - self.last_vel_ts
-
-        if dt > 0:
-            self.R_bw = np.array([
-                [ np.cos(self.yaw), -np.sin(self.yaw)],
-                [ np.sin(self.yaw),  np.cos(self.yaw)],
-            ])
-            vx = msg.twist.linear.x
-            vy = msg.twist.linear.y
-            v_body = np.array([vx, vy])
-            # v_world = self.R_bw @ v_body
-            # self.prediction(v_body[0]*dt, v_body[1]*dt) # control input
-        self.last_vel_ts = ts
-        # self.pure_imu_estimate[0] = self.pure_imu_estimate[0] + vx*dt
-        # self.pure_imu_estimate[1] = self.pure_imu_estimate[1] + vy*dt
-        # print("imu:", self.pure_imu_estimate[:2])
-        # if abs(self.pose[0] - 20) < 0.5 and abs(self.pose[1] - 20) < 0.5 and not self.once:
-        #     print('export csv')
-        #     self.plot_trajectories_and_error()
-        #     self.once = True
-
+    
     def odom_cb(self, msg: Odometry):
         x, y = msg.pose.pose.position.x, msg.pose.pose.position.y
         if self.last_odom is None:
@@ -137,45 +116,28 @@ class EKFSLAM:
             self.last_imu_ts = ts
             return  # Skip first frame, because we have no delta_t yet
         dt = ts - self.last_imu_ts
-        q = msg.orientation
-        x, y, z, w = q.x, q.y, q.z, q.w
-
-        # Roll (rotation around X-axis)
-        sinr_cosp = 2.0 * (w * x + y * z)
-        cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
-        self.roll = np.arctan2(sinr_cosp, cosr_cosp)
-
-        # Pitch (rotation around Y-axis)
-        sinp = 2.0 * (w * y - z * x)
-        if abs(sinp) >= 1:
-            self.pitch = np.pi / 2 * np.sign(sinp)  # Use 90 degrees if out of range
-        else:
-            self.pitch = np.arcsin(sinp)
-
-        # Yaw (rotation around Z-axis)
-        siny_cosp = 2.0 * (w * z + x * y)
-        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-        self.yaw = np.arctan2(siny_cosp, cosy_cosp)
-        ax = msg.linear_acceleration.x
-        ay = msg.linear_acceleration.y
-        if dt > 0:
-            self.prediction(0.5* ax*dt**2, 0.5*ay*dt**2) # control input
         self.last_imu_ts = ts
-        # self.pure_imu_estimate[0] = self.pure_imu_estimate[0] + 0.5*ax*dt**2
-        # self.pure_imu_estimate[1] = self.pure_imu_estimate[1] + 0.5*ay*dt**2
-        # # print(0.5*ax*dt**2, 0.5*ay*dt**2)
-        # print("imu:", self.pure_imu_estimate[:2])
-        # # print("imu:", self.pure_imu_estimate[:2])
-        # if abs(self.pose[0] - 20) < 0.5 and abs(self.pose[1] - 20) < 0.5 and not self.once:
-        #     print('export csv')
-        #     self.plot_trajectories_and_error()
-        #     self.once = True
+        q = [msg.orientation.x,
+             msg.orientation.y,
+             msg.orientation.z,
+             msg.orientation.w]
+        R = quaternion_matrix(q)[:3, :3]
+        g_body = R.dot(np.array([0.0, 0.0, 9.81]))
+        a_raw = np.array([
+            msg.linear_acceleration.x,
+            msg.linear_acceleration.y,
+            msg.linear_acceleration.z])
+        a_lin = a_raw - g_body
+        self.vel += a_lin.reshape(-1,1) * dt
+        self.pure_imu_estimate[0] += self.vel[1] * dt
+        self.pure_imu_estimate[1] += self.vel[0] * dt
+        self.prediction(self.vel[1] * dt, self.vel[0] * dt) # control input
 
     def prediction(self, dx, dy):
         self.mu[0] += dx
         self.mu[1] += dy
-        self.pure_imu_estimate[0] += dx
-        self.pure_imu_estimate[1] += dy
+        # self.pure_imu_estimate[0] += dx
+        # self.pure_imu_estimate[1] += dy
 
         dim = self.Sigma.shape[0]
         Q_big = np.zeros((dim, dim), dtype=np.float32)
@@ -290,7 +252,9 @@ class EKFSLAM:
         if new_kps:
             self.add_landmarks(new_kps, np.array(new_des, dtype=np.uint8))
 
-        if abs(self.pose[0] - 10) < 0.5 and abs(self.pose[1] - 10) < 0.5 and not self.once:
+        if (self.final_dest is None):
+            return
+        if abs(self.pose[0] - self.final_dest[0]) < 0.2 and abs(self.pose[1] - self.final_dest[1]) < 0.2 and not self.once:
             self.plot_trajectories_and_error()
             self.once = True
             # time.sleep(60)

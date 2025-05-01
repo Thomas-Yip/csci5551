@@ -10,6 +10,11 @@ colcon build # If you haven't compiled yet
 . install/setup.bash 
 ros2 run drone_control drone_control_demo
 ```
+# NEW
+After launch, to start zig zag search, enter the start and end point. x_s = x_start, y_s = y_end, step size = 1;                     
+Execute python3 main.py to start slam.                               
+Enter go and drone will move.
+
 
 ```cpp
   float setPoints[5][3] = { 
