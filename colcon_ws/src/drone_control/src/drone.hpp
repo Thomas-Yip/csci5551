@@ -47,13 +47,13 @@ public:
         // Set mode to OFFBOARD
         // setMode("OFFBOARD");
         no_setpoint = false;
-        cout << "Enter search range: x_s, y_s, x_e, y_e, altitude, step_size" << endl;
+        cout << "Enter search range: x_s, y_s, x_e, y_e, altitude, step_size_x, step_size_y" << endl;
         int x_s, y_s, x_e, y_e;
         int z;
-        int step_size;
-        step_size = 1;
-        cin >> x_s >> y_s >> x_e >> y_e >> z >> step_size;
-        generate_waypoints(x_s, y_s, x_e, y_e, z, step_size);        
+        int step_size_x;
+        int step_size_y;
+        cin >> x_s >> y_s >> x_e >> y_e >> z >> step_size_x>> step_size_y;
+        generate_waypoints(x_s, y_s, x_e, y_e, z, step_size_x, step_size_y);        
         final_dest.pose.position.x = waypoints[current_setpoint_ind][0];
         final_dest.pose.position.y = waypoints[current_setpoint_ind][1];
         final_dest.pose.position.z = waypoints[current_setpoint_ind][2];
@@ -71,6 +71,7 @@ public:
 
   void main_loop()
   {
+    // move_to_setpoint(waypoints[0][0], waypoints[0][1], waypoints[0][2], 1);
     // Slow update rate for smoother motion
     rclcpp::Rate rate(10.0);  // 10 Hz instead of 50
     int toggle = 1;
@@ -98,14 +99,24 @@ public:
 
         if (check_setpoint_reached(current_pose, setpoint)) {
             if (current_setpoint_ind < num_waypoints && arrived == false) {
-              current_setpoint_ind  += 1;
+              if (counter < 4) {
+                RCLCPP_INFO(this->get_logger(), "Current setpoint: %d", current_setpoint_ind);
+                current_setpoint_ind++;
+              }else{
+                RCLCPP_INFO(this->get_logger(), "HOLD");
+              }
+              if (counter > 14) {
+                counter = 0;
+              }
+              RCLCPP_INFO(this->get_logger(), "Counter: %d", counter);
+              counter++;
+                    
             }else{
               current_setpoint_ind = num_waypoints - 1;
               arrived = true;
             }
               cout << "Reached setpoint: " << current_setpoint_ind << endl;
         }
-        RCLCPP_INFO(this->get_logger(), "Current setpoint: %d", current_setpoint_ind);
         publish_setpoint(setpoint);
 
         rclcpp::spin_some(this->get_node_base_interface());
@@ -121,7 +132,7 @@ private:
   bool arrived = false;
   bool enter_go = false;
   int current_setpoint_ind = 0;
-
+  int counter = 0;
   // ROS communication objects
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr setpoint_pub;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr odom_sub;
@@ -160,48 +171,97 @@ private:
     setpoint_pub->publish(setpoint);
   }
 
-  void generate_waypoints(int x_s, int y_s, int x_e, int y_e, int z, int step_size)
+  void move_to_setpoint(int x_s, int y_s, int z, int step_size) {
+    int step_x = (x_s - current_pose.pose.position.x) * step_size / abs(x_s);
+    int step_y = (y_s - current_pose.pose.position.y) * step_size / abs(y_s);
+
+    for (int i = 0; i < step_size; ++i) {
+      setpoint.pose.position.x += step_x;
+      setpoint.pose.position.y += step_y;
+      setpoint.pose.position.z = z;
+      publish_setpoint(setpoint);
+      rclcpp::spin_some(this->get_node_base_interface());
+    }
+  }
+
+  void generate_waypoints(int x_s, int y_s, int x_e, int y_e, int z, int step_size_x, int step_size_y)
   {
-    int search_start_range[2] = {x_s,y_s};
-    int search_end_range[2] = {x_e,y_e};
-    num_waypoints = 
-    (search_end_range[0] - search_start_range[0] + 1) * (search_end_range[1] - search_start_range[1] + 1);
-    cout << num_waypoints << endl;
-    int rows = search_end_range[1] - search_start_range[1];
-    int cols = search_end_range[0] - search_start_range[0];
-    int direction = 1;
-    int row_transition = false;
-    int x = search_start_range[0];
-    int y = search_start_range[1];
-    int lock = false;
-    // int waypoints[num_waypoints][2];
+    // int search_start_range[2] = {x_s,y_s};
+    // int search_end_range[2] = {x_e,y_e};
+    // num_waypoints = 
+    // (search_end_range[0] - search_start_range[0] + 1) * (search_end_range[1] - search_start_range[1] + 1) / (step_size * step_size);
+    // cout << num_waypoints << endl;
+    // int rows = step_size * (search_end_range[1] - search_start_range[1]);
+    // int cols = step_size * (search_end_range[0] - search_start_range[0]);
+    // int direction = 1;
+    // int row_transition = false;
+    // int x = search_start_range[0];
+    // int y = search_start_range[1];
+    // int lock = false;
+    // // int waypoints[num_waypoints][2];
+    // waypoints = new int*[num_waypoints];
+    // for (int i = 0; i < num_waypoints; i++) {
+    //     waypoints[i] = new int[3];
+    // }
+    // for (int i = 0; i < num_waypoints; i++) {
+    //     // cout << x << ',' << y << endl;
+    //     waypoints[i][0] = x;
+    //     waypoints[i][1] = y;
+    //     waypoints[i][2] = z;
+    //     if(!row_transition){
+    //         if (direction == 1) {
+    //             x += step_size;
+    //         } else {
+    //             x -= step_size;
+    //         }
+    //     }else{
+    //         row_transition = false;
+    //         lock = true;
+    //         y += step_size;
+    //     }
+    //     if ((x == search_start_range[0] || x == search_end_range[0]) && !lock) {
+    //         // row_transition =  true;
+    //         direction *= -1;
+    //         row_transition = true;
+    //     }
+    //     if(lock) 
+    //         lock = false;
+    // }
+    // 1) compute how many steps in x and y (inclusive)
+    int nx = (x_e - x_s) / step_size_x + 1;
+    int ny = (y_e - y_s) / step_size_y + 1;
+    num_waypoints = nx * ny;
+    cout << "num_waypoints = " << num_waypoints << endl;
+
+    // 2) allocate your waypoints[num_waypoints][3]
     waypoints = new int*[num_waypoints];
     for (int i = 0; i < num_waypoints; i++) {
         waypoints[i] = new int[3];
     }
-    for (int i = 0; i < num_waypoints; i++) {
-        // cout << x << ',' << y << endl;
-        waypoints[i][0] = x;
-        waypoints[i][1] = y;
-        waypoints[i][2] = z;
-        if(!row_transition){
-            if (direction == 1) {
-                x += step_size;
-            } else {
-                x -= step_size;
+
+    // 3) fill them row by row, alternating left→right and right→left
+    int idx = 0;
+    for (int row = 0; row < ny; row++) {
+        int y = y_s + row * step_size_y;
+        if (row % 2 == 0) {
+            // even row: x increases
+            for (int col = 0; col < nx; col++) {
+                int x = x_s + col * step_size_x;
+                waypoints[idx][0] = x;
+                waypoints[idx][1] = y;
+                waypoints[idx][2] = z;
+                ++idx;
             }
-        }else{
-            row_transition = false;
-            lock = true;
-            y += step_size;
+        } else {
+            // odd row: x decreases
+            for (int col = nx - 1; col >= 0; col--) {
+                int x = x_s + col * step_size_x;
+                waypoints[idx][0] = x;
+                waypoints[idx][1] = y;
+                waypoints[idx][2] = z;
+                ++idx;
+            }
         }
-        if ((x == search_start_range[0] || x == search_end_range[0]) && !lock) {
-            // row_transition =  true;
-            direction *= -1;
-            row_transition = true;
-        }
-        if(lock) 
-            lock = false;
     }
   }
 

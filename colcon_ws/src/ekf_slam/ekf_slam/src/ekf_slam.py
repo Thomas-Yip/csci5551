@@ -16,7 +16,7 @@ import time
 import csv
 
 MAX_FEATURES = 16
-MAX_LANDMARKS = 512
+MAX_LANDMARKS = 128
 DESC_DIM      = 32   # ORB’s descriptor length
 
 class EKFSLAM:
@@ -89,7 +89,7 @@ class EKFSLAM:
         self.history_gps = []    # IMU-GPS fused poses
         self.vel = np.zeros((3, 1), dtype=np.float32)
         self.once = False
-
+        self.hikers = []
         self.final_dest = None
 
     def final_dest_cb(self, msg: PoseStamped):
@@ -136,9 +136,6 @@ class EKFSLAM:
     def prediction(self, dx, dy):
         self.mu[0] += dx
         self.mu[1] += dy
-        # self.pure_imu_estimate[0] += dx
-        # self.pure_imu_estimate[1] += dy
-
         dim = self.Sigma.shape[0]
         Q_big = np.zeros((dim, dim), dtype=np.float32)
         Q_big[0:2, 0:2] = self.Q_motion
@@ -148,11 +145,35 @@ class EKFSLAM:
         self.rgb_img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         self.rgb_ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         self.try_measure()
+        self.detect_hikers()
+    
+    def detect_hikers(self):
+        hsv = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2HSV)
+        lower_red = np.array([0, 100, 100])
+        upper_red = np.array([10, 255, 255])
+        mask = cv2.inRange(hsv, lower_red, upper_red)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            if cv2.contourArea(contour) > 100:
+                x, y, w, h = cv2.boundingRect(contour)
+                cv2.rectangle(self.rgb_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                d = float(self.depth_img[int(y), int(x)])
+                p_robot = self.back_project(x, y, d)[:2]
+                lm_w = (self.R_rw @ p_robot.reshape(2,1) + self.mu[0:2]).flatten()
+                if len(self.hikers) == 0:
+                    self.hikers.append(lm_w)
+                else:
+                    for i in range(len(self.hikers)):
+                        hiker = self.hikers[i]
+                        if np.linalg.norm(hiker - lm_w) < 1.0:
+                            self.hikers[i] = (self.hikers[i] + lm_w) / 2
+                cv2.putText(self.rgb_img, "Hiker: "+str(lm_w), (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        print(self.hikers)        
+        self.debug_img = self.rgb_img.copy()
 
     def depth_cb(self, msg: Image):
         self.depth_img = self.bridge.imgmsg_to_cv2(msg, '32FC1')
         self.depth_ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        # self.try_measure()
 
     def try_measure(self):
         if self.rgb_ts is None or self.depth_ts is None:
@@ -168,7 +189,7 @@ class EKFSLAM:
     def measurement(self):
         gray = cv2.cvtColor(self.rgb_img, cv2.COLOR_BGR2GRAY)
         tuple_kps, des = self.orb.detectAndCompute(gray, None)
-        self.debug_img = cv2.drawKeypoints(self.rgb_img, tuple_kps, None, color=(0, 255, 0), flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+        # self.debug_img = cv2.drawKeypoints(self.rgb_img, tuple_kps, None, color=(0, 255, 0), flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
         kps = list(tuple_kps)
         if kps is None or len(kps) == 0:
             return
@@ -177,10 +198,6 @@ class EKFSLAM:
         if self.num_landmarks == 0:
             self.add_landmarks(kps, des)
             return       
-        # print(des.shape)
-        # print(len(kps))
-        # 1) descriptor matching (ratio-test)
-        # print('kps length: ', len(kps))
         matches = self.bf.knnMatch(self.landmark_desc[:self.num_landmarks], des, k=2)
         good = [m for m, n in matches if m.distance < 0.75 * n.distance]
     
@@ -234,12 +251,13 @@ class EKFSLAM:
         I          = np.eye(state_dim, dtype=np.float32)
         self.Sigma = (I - K @ H) @ self.Sigma
         self.Sigma = 0.5 * (self.Sigma + self.Sigma.T)   # numerical symmetry
-        self.update_plot(self.landmarks_pts[:self.num_landmarks].T)
+        # self.update_plot(self.landmarks_pts[:self.num_landmarks].T)
         # print("num_landmarks:", self.num_landmarks)
         print('Robot pose relative to world frame: X, Y')
         print(f"IMU-RGBD EKF SlAM: {self.mu[:2,0]}")
         print(f'IMU-based Dead Reckoning: {self.pure_imu_estimate[:2,0]}')
         print(f'IMU-GPS-based position estimation: {self.pose[:2,0]}')
+        print(f'num landmarks: {self.num_landmarks}')
         # after you update self.mu, self.pure_imu_estimate and self.pose:
         self.history_slam.append(self.mu[:2,0].copy())
         self.history_imu.append(self.pure_imu_estimate[:2,0].copy())
@@ -250,6 +268,10 @@ class EKFSLAM:
         new_kps  = [kp  for i, kp  in enumerate(kps) if i not in matched_train]
         new_des  = [des for i, des in enumerate(des) if i not in matched_train]
         if new_kps:
+            if self.num_landmarks == MAX_LANDMARKS:
+                print("Too many landmarks, skipping measurement")
+                # return
+                self.queue_pruning()
             self.add_landmarks(new_kps, np.array(new_des, dtype=np.uint8))
 
         if (self.final_dest is None):
@@ -258,13 +280,56 @@ class EKFSLAM:
             self.plot_trajectories_and_error()
             self.once = True
             # time.sleep(60)
-            
-        
+    def random_pruning(self):
+        remove_number = MAX_FEATURES * 2
+        keep_ind = np.random.choice(self.num_landmarks, MAX_LANDMARKS - remove_number, replace=False).astype(np.int32)
+        keep_ind = np.sort(keep_ind)
+        print('keep ind:', keep_ind.shape)
+        landmark_pts = np.zeros((MAX_LANDMARKS, 2), dtype=np.float32)
+        landmark_kps = [None] * MAX_LANDMARKS
+        landmark_desc = np.zeros((MAX_LANDMARKS, DESC_DIM), dtype=np.uint8)
+        # print(self.landmark_kps.shape)
+        landmark_kps[:MAX_LANDMARKS - remove_number] = [self.landmark_kps[i] for i in keep_ind]
+        landmark_desc[:MAX_LANDMARKS - remove_number] = self.landmark_desc[keep_ind]
+        landmark_pts[:MAX_LANDMARKS - remove_number] = self.landmarks_pts[keep_ind]
+        mu = np.zeros((2 + (MAX_LANDMARKS - remove_number)*2, 1), dtype=np.float32)
+        mu[:2] = self.mu[:2]
+        mu_keep_ind = np.vstack(([keep_ind*2, keep_ind*2+1])).T.flatten()
+        mu[2:] = self.mu[2 + mu_keep_ind]
+        Sigma = np.zeros((2 + 2*(MAX_LANDMARKS - remove_number), 2 + 2*(MAX_LANDMARKS - remove_number)), dtype=np.float32)
+        Sigma[:2, :2] = self.Sigma[:2, :2]
+        Sigma[2:, 2:] = self.Sigma[2 + mu_keep_ind, 2 + mu_keep_ind]
+        Sigma[:2, 2:] = self.Sigma[:2, 2 + mu_keep_ind]
+        Sigma[2:, :2] = self.Sigma[2 + mu_keep_ind, :2]
+        self.landmarks_pts = landmark_pts
+        self.landmark_kps = landmark_kps
+        self.landmark_desc = landmark_desc
+        self.mu = mu
+        self.Sigma = Sigma
+        self.num_landmarks -= remove_number
+
+    def queue_pruning(self):
+        remove_number = MAX_FEATURES * 2
+        landmark_pts = np.zeros((MAX_LANDMARKS, 2), dtype=np.float32)
+        landmark_kps = [None] * MAX_LANDMARKS
+        landmark_desc = np.zeros((MAX_LANDMARKS, DESC_DIM), dtype=np.uint8)
+        landmark_kps[:MAX_LANDMARKS - remove_number] = self.landmark_kps[remove_number:]
+        landmark_desc[:MAX_LANDMARKS - remove_number] = self.landmark_desc[remove_number:]
+        landmark_pts[:MAX_LANDMARKS - remove_number] = self.landmarks_pts[remove_number:]
+        mu = np.zeros((2 + (MAX_LANDMARKS - remove_number)*2, 1), dtype=np.float32)
+        mu[:2] = self.mu[:2]
+        mu[2:] = self.mu[2 + 2*remove_number:]
+        Sigma = np.zeros((2 + 2*(self.num_landmarks - remove_number), 2 + 2*(self.num_landmarks - remove_number)), dtype=np.float32)
+        Sigma[:2, :2] = self.Sigma[:2, :2]
+        Sigma[2:, 2:] = self.Sigma[2 + 2*remove_number:, 2 + 2*remove_number:]
+        self.landmarks_pts = landmark_pts
+        self.landmark_kps = landmark_kps
+        self.landmark_desc = landmark_desc
+        self.mu = mu
+        self.Sigma = Sigma
+        self.num_landmarks -= remove_number
         
     def plot_trajectories_and_error(self):
-        # import numpy as np
-        # import matplotlib.pyplot as plt
-
         # Stack into (N×2) arrays
         slam_arr = np.vstack(self.history_slam)
         imu_arr  = np.vstack(self.history_imu)
@@ -289,17 +354,6 @@ class EKFSLAM:
             writer.writerow(['x', 'y'])
             for i in range(len(gps_arr)):
                 writer.writerow([gps_arr[i, 0], gps_arr[i, 1]])
-
-        # # 2) Plot all three trajectories
-        # plt.figure()
-        # plt.plot(slam_arr[:,0], slam_arr[:,1],      label='EKF-SLAM')
-        # plt.plot(imu_arr[:,0],  imu_arr[:,1],       label='IMU Dead Reckoning')
-        # plt.plot(gps_arr[:,0],  gps_arr[:,1],       label='IMU-GPS')
-        # plt.legend()
-        # plt.xlabel('X position')
-        # plt.ylabel('Y position')
-        # plt.title(f"Trajectories (mean SLAM error = {mean_err:.3f})")
-        # plt.show()
 
     def add_landmarks(self, kps, des):
         for kp, desc in zip(kps, des):
