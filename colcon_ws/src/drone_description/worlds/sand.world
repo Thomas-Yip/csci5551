@@ -122,22 +122,22 @@
 
     <include>
       <uri>model://dummies/white_dummy</uri>
-      <pose degrees="true">1 0 0 0 0  90</pose>
+      <pose degrees="true">10 50 0 0 0  90</pose>
     </include>
 
     <include>
       <uri>model://dummies/black_dummy</uri>
-      <pose degrees="true">5 5 1 0 0  0</pose>
+      <pose degrees="true">15 25 4 0 0  0</pose>
     </include>
 
     <include>
       <uri>model://dummies/red_dummy</uri>
-      <pose degrees="true">9 9 3 0 0  0</pose>
+      <pose degrees="true">79 89 3 0 0  0</pose>
     </include>
 
         <include>
       <uri>model://dummies/blue_dummy</uri>
-      <pose degrees="true">3 7 1 0 0  0</pose>
+      <pose degrees="true">30 70 1 0 0  0</pose>
     </include>
 
 

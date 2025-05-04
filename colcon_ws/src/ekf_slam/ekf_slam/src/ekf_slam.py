@@ -163,12 +163,22 @@ class EKFSLAM:
                 if len(self.hikers) == 0:
                     self.hikers.append(lm_w)
                 else:
+                    match = False
                     for i in range(len(self.hikers)):
                         hiker = self.hikers[i]
-                        if np.linalg.norm(hiker - lm_w) < 1.0:
+                        if np.linalg.norm(hiker - lm_w) < 4.0:
                             self.hikers[i] = (self.hikers[i] + lm_w) / 2
-                cv2.putText(self.rgb_img, "Hiker: "+str(lm_w), (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        print(self.hikers)        
+                            match = True
+                            break
+                    if not match:
+                        self.hikers.append(lm_w)
+                # cv2.putText(self.rgb_img, "Hiker: "+str(lm_w), (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        # foo = np.zeros((len(self.hikers), 2), dtype=np.float32)
+        # for i in range(len(self.hikers)):
+        #     foo[i] = self.hikers[i]
+        # self.update_plot(foo.T)
+        # if(len(self.hikers) > 0):
+        #     self.update_plot(np.array(self.hikers).T)        
         self.debug_img = self.rgb_img.copy()
 
     def depth_cb(self, msg: Image):
@@ -258,6 +268,7 @@ class EKFSLAM:
         print(f'IMU-based Dead Reckoning: {self.pure_imu_estimate[:2,0]}')
         print(f'IMU-GPS-based position estimation: {self.pose[:2,0]}')
         print(f'num landmarks: {self.num_landmarks}')
+        print(f'hikers: {self.hikers}')
         # after you update self.mu, self.pure_imu_estimate and self.pose:
         self.history_slam.append(self.mu[:2,0].copy())
         self.history_imu.append(self.pure_imu_estimate[:2,0].copy())
