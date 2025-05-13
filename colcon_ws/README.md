@@ -1,29 +1,40 @@
-# Reminder
-Make use of TAB when entering command
 # Drone launch
+## Launch the simulation environment
 ```sh
 cd ~/colcon_ws
 colcon build # if first time / code is modified
 . install/setup.bash
 ros2 launch drone_bringup drone.launch.py
 ```
+## Connect the UAV flight controller to ROS
 Open a new terminal
-```sh
-cd ~/ardupilot/Tools/autotest
-python3 sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON --map --console --out 127.0.0.1:14551
-```
-OR 
 ```sh
 cd ~/colcon_ws
 ./sv.sh
 ```
-
+OR 
+```sh
+cd ~/ardupilot/Tools/autotest
+python3 sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON --map --console --out 127.0.0.1:14551
+```
+## UAV takeoff
 Test drone takeoff (In the terminal you execute ./sv.sh)
 ```sh
 mode guided
 arm throttle # Wait until drone GPS is available
-takeoff 5
+takeoff 10 # Set UAV takeoff altitude
 ```
+## Run EKF SLAM
+```sh
+cd ~/colcon_ws/src/ekf_slam/ekf_slam/src
+python3 main.py
+```
+## Launch zig zag search
+```sh
+ros2 run drone_control drone_control_demo 
+```
+Enter start coordinate (x,y), dest coordinate (x,y), drone altitude, step size in x-direction, step size in y-direction.      
+After entering all information, enter "go" and drone will start searching.  
 
 
 

@@ -11,7 +11,8 @@ from launch_ros.actions import Node
 def generate_launch_description():
 
     drone_description = get_package_share_directory('drone_description')
-    world_file = os.path.join(drone_description, 'worlds', 'sand.world')
+    world_file = os.path.join(drone_description, 'worlds', 'rubicon_world.sdf')
+    # world_file = os.path.join(drone_description, 'worlds', 'sand.world')
     drone_bringup = get_package_share_directory('drone_bringup')
     mavros_params_file = os.path.join(drone_bringup, 'params', 'sim_mavros_params.yaml')
 
@@ -40,13 +41,19 @@ def generate_launch_description():
             package='rqt_image_view',
             executable='rqt_image_view',
         ),
+        # Node(
+        #     package='ros_gz_bridge',
+        #     executable='parameter_bridge',
+        #     arguments=['/world/iris_runway/model/iris_with_depth_camera/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu@sensor_msgs/msg/Imu[gz.msgs.IMU'
+        #     ],
+        #     output='screen'
+        # ),
         Node(
             package='ros_gz_bridge',
             executable='parameter_bridge',
-            arguments=['/world/iris_runway/model/iris_with_depth_camera/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu@sensor_msgs/msg/Imu[gz.msgs.IMU'
+            arguments=['/world/challenge/model/iris_with_depth_camera/model/iris_with_standoffs/link/imu_link/sensor/imu_sensor/imu@sensor_msgs/msg/Imu[gz.msgs.IMU'
             ],
             output='screen'
         ),
-
 
     ])

@@ -1,4 +1,9 @@
 # ekf_slam
+## How to launch ekm slam?
+```
+cd ~/colcon_ws/src/ekf_slam/ekf_slam/src
+python3 main.py
+```
 ## How to get the 3D position of a point relative to the drone?
 ```py
 # Read the depth value (Z) at (u,v)
