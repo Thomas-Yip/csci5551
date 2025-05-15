@@ -1,0 +1,16 @@
+<?xml version="1.0" ?><sdf version="1.6">
+  <model name="yello_dummy">
+    <static>true</static>
+    <link name="link">
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://dummies/yello_dummy/meshes/yello_dummy.dae</uri>
+          <!-- <scale>4.0 4.0 4.0</scale></mesh> -->
+                    </mesh>
+
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>

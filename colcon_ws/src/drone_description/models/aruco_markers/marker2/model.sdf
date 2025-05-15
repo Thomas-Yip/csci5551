@@ -6,7 +6,7 @@
         <geometry>
           <mesh>
             <uri>model://aruco_markers/marker2/meshes/Marker2.dae</uri>
-          <scale>2.0 2.0 2.0</scale></mesh>
+          <scale>1.0 1.0 1.0</scale></mesh>
         </geometry>
       </visual>
     </link>

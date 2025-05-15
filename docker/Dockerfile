@@ -153,6 +153,7 @@
       RUN pip3 install matplotlib
       RUN sudo apt-get install -y ros-humble-mavros
       RUN sudo ./install_geographiclib_datasets.sh
+      RUN sudo apt-get install -y ros-humble-tf-transformations
 
     RUN echo 'export GZ_SIM_SYSTEM_PLUGIN_PATH=$HOME/ardupilot_gazebo/build:${GZ_SIM_SYSTEM_PLUGIN_PATH}' >> ~/.bashrc
     RUN echo 'export GZ_SIM_RESOURCE_PATH=$HOME/ardupilot_gazebo/models:$HOME/ardupilot_gazebo/worlds:${GZ_SIM_RESOURCE_PATH}' >> ~/.bashrc
