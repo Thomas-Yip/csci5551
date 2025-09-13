@@ -13,3 +13,5 @@ Instruction inside docker folder
 Instruction inside colcon_ws
 ## Reference
 This project is built upon [orca4](https://github.com/clydemcqueen/orca4), a ROS2 Autonomous Underwater Vehicle simulation. The system configuration is modified from orca4. 
+
+<img width="2142" height="2500" alt="G14_poster_Autonomous rescue drone pptx" src="https://github.com/user-attachments/assets/b5cc6434-5d45-432a-b50e-39e46c4a6c94" />
