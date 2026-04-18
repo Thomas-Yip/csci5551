@@ -1,6 +1,9 @@
 # CSCI5551: Introduction to Intelligent Robotic Systems
 # Group: G14
 # Project name: Using SLAM Navigation on an Autonomous Rescue Drone to Find Hikers
+## VIDEO!!!
+[![Watch the video](https://img.youtube.com/vi/v8n0r89OTLc/0.jpg)](https://www.youtube.com/watch?v=v8n0r89OTLc)
+
 ## Group members
 1. [Thomas Yip](https://github.com/Thomas-Yip): yip00023@umn.edu 
 2. [Yu-an Tsai](https://github.com/anne92114): tsai0203@umn.edu
